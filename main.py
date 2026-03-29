@@ -1,36 +1,60 @@
 import cv2
-import mediapipe as mp
 import pyautogui
+import numpy as np
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
+import urllib.request
+import os
 
-from mediapipe.python.solutions import hands as mp_hands_module
-from mediapipe.python.solutions import drawing_utils as mp_drawing
-
-hands = mp_hands_module.Hands(max_num_hands=1, min_detection_confidence=0.7)
+# Download the hand landmarker model if not present
+model_path = "hand_landmarker.task"
+if not os.path.exists(model_path):
+    print("Downloading hand landmarker model...")
+    urllib.request.urlretrieve(
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        model_path
+    )
+    print("Downloaded!")
 
 screen_w, screen_h = pyautogui.size()
 cap = cv2.VideoCapture(0)
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+options = HandLandmarkerOptions(
+    base_options=python.BaseOptions(model_asset_path=model_path),
+    running_mode=RunningMode.IMAGE,
+    num_hands=1
+)
 
-    frame = cv2.flip(frame, 1)
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb)
+with HandLandmarker.create_from_options(options) as landmarker:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            lm = hand_landmarks.landmark[8]
-            x = int(lm.x * screen_w)
-            y = int(lm.y * screen_h)
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = landmarker.detect(mp_image)
 
-            pyautogui.moveTo(x, y)
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands_module.HAND_CONNECTIONS)
+        if result.hand_landmarks:
+            for hand_landmarks in result.hand_landmarks:
+                # Index fingertip = landmark 8
+                lm = hand_landmarks[8]
+                x = int(lm.x * screen_w)
+                y = int(lm.y * screen_h)
+                pyautogui.moveTo(x, y)
 
-    cv2.imshow('Virtual Mouse', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+                # Draw dots on hand
+                for landmark in hand_landmarks:
+                    cx = int(landmark.x * frame.shape[1])
+                    cy = int(landmark.y * frame.shape[0])
+                    cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+
+        cv2.imshow('Virtual Mouse', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 cap.release()
 cv2.destroyAllWindows()
